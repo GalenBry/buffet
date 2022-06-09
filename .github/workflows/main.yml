@@ -1,0 +1,10 @@
+name: Deploy to Glitch
+on:
+  workflow_dispatch:
+
+jobs:
+  sync_git_repo:
+    runs-on: ubuntu-latest
+    steps:
+    - run: |
+        echo "deploy triggered
