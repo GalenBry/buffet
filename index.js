@@ -40,50 +40,88 @@ const webhooks = new Webhooks({
   secret: process.env.GITHUB_WEBHOOK_SECRET,
 });
 createServer(createNodeMiddleware(webhooks)).listen(3000)
-console.log('github server started')
+console.log('⚡️ Github app is running!')
 
 
 ////// SLACK //////
 
 /**
-* Gets all channels current bot is invited to
-*/
-const getChannels = async () => {
-  try {
-    const resp = await slack_app.client.users.conversations({
-      user: app_info.user_id
-    });
-    return resp.channels
-  } catch (e) {
-    console.log(e)
-    return []
-  }
-}
-
-/**
-* Command to setup a ecosystem around a repo
+* Command to setup all integrations
 */
 slack_app.command("/buffet", async ({command, ack, say, respond }) => {
   await ack();
 
   const [action, ...values] = command.text.split(' ')
 
-  // TODO: better args validation
-  if (action === 'setup' && values.length === 3) {
-    const [owner, repo, jira_project] = values
-    await setupWebhook(owner, repo, say, respond)
+  if (action === 'setup' && values.length === 4) {
+    const [owner, repo, workflow, jira_project] = values
+
+    try {
+      const resp = await createWebhook(owner, repo)
+      await say(`Buffet is now listening to releases on this repository: ${resp.url}`)
+    } catch (e) {
+      await respond(`An issue occured while creating a webhook for this repository: ${e.request.url}`)
+    }
 
     // Save repo settings for later
     addRepo({
       name: repo,
       owner,
+      workflow,
       jira_project
     })
   } else {
-    await respond("command must be of this format `setup [repository_owner] [repository_name]`")
+    await respond('command must be of this format `setup [repository_owner] [repository_name] [repository_workflow] [jira_project_shortname]`')
   }
 })
 
+/**
+* Action to deploy a release
+*/
+slack_app.action("deploy_release", async ({ ack, respond, say, client, body, payload, ...args }) => {
+  await ack();
+
+  const [ repo, tag ] = payload.value.split('|')
+  const { owner, workflow } = getRepo(repo);
+
+  if (workflow) {
+    try {
+      await dispatchWorkflow(owner, repo, workflow, tag)
+      await say({
+        thread_ts: body.message.ts,
+        text: ':runner: Initiating deploy...',
+      })
+    } catch (e) {
+      console.log(e)
+      //respond
+      await say({
+        thread_ts: body.message.ts,
+        text: ':x: Workflow could not be initiated',
+      })
+      return
+    }
+
+    // Wait a couple seconds to allow github to insert new run to db
+    await delay(2000)
+    const workflowRun = await getLatestWorkflowRun(owner, name, workflow)
+
+    const workflowRunInfo = workflowRun ? `The workflow can be found here: ${workflowRun.html_url}` : ''
+    await say({
+      thread_ts: body.message.ts,
+      text: `:rocket: A deploy workflow has been initiated by <@${body.user.id}>. ${workflowRunInfo}`,
+    })
+  } else {
+    // respond
+    await say({
+      thread_ts: body.message.ts,
+      text: ':x: Workflow configuration for this repo not found!',
+    })
+  }
+})
+
+/**
+* Function called after a new release has been published
+*/
 const onNewRelease = async (repository, release) => {
   // Send message to all bot channels
   const channels = await getChannels();
@@ -93,18 +131,15 @@ const onNewRelease = async (repository, release) => {
 }
 
 const sendNewReleaseMessage = async (channel, repository, release) => {
-  // Parse release description to get references to Jira issues and find links to them
-  const { jira_project } = getRepo(repository.name);
-  const jira_issues = jira_project ? [...new Set(parseJiraIssues(release.body, jira_project))] : []
-  const responses = jira_issues.length ? await Promise.all(jira_issues.map(issue => getJiraIssue(issue))) : []
-  const matched_issues = responses
-    .filter(issue => issue) // Remove any matches that were not found
-  const jira_links = matched_issues
+  const { workflow, jira_project } = getRepo(repository.name);
+
+  const jira_issues = await getJiraLinks(release.body, jira_project)
+  const jira_links = jira_issues
     .reduce((links, issue) => links + `\n - ${issue.self}`, '') // Format links for display
 
   const repo_section = `:octopus: *Repo:* <${repository.html_url}|${repository.name}>`
   const tag_section = `:label: *Tag:* <${release.html_url}|${release.name} - ${release.tag_name}>`
-  const jira_section = `:earth_americas: *JIRA stories*:${matched_issues.length ? jira_links : ' no issues found'}`
+  const jira_section = `:earth_americas: *JIRA stories*:${jira_issues.length ? jira_links : ' no issues found'}`
   const description_section = `:page_with_curl: *Description:*\n${release.body}`
 
   const result = await slack_app.client.chat.postMessage({
@@ -117,7 +152,7 @@ const sendNewReleaseMessage = async (channel, repository, release) => {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `:wave: *Buffet has detected a new release*`
+          text: `:wave: *A new release has been published*`
         }
       },
       {
@@ -132,8 +167,53 @@ const sendNewReleaseMessage = async (channel, repository, release) => {
       },
     ]
   });
+
+  if (workflow) {
+    const result_2 = await slack_app.client.chat.postMessage({
+      channel: channel.id,
+      text: `A deploy workflow has been setup for this repo`,
+      thread_ts: result.message.ts,
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: ':robot_face: A deploy workflow has been setup for this repo!'
+          }
+        },
+        {
+          "type": "actions",
+          "elements": [
+            {
+              "type": "button",
+              "text": {
+                "type": "plain_text",
+                "text": "Deploy"
+              },
+              "style": "primary",
+              "value": `${repository.name}|${release.tag_name}`,
+              "action_id": "deploy_release"
+            }
+          ]
+        },
+      ]
+    })
+  }
 }
 
+/**
+* Gets all channels current bot is invited to
+*/
+const getChannels = async () => {
+  try {
+    const resp = await slack_app.client.users.conversations({
+      user: app_info.user_id
+    });
+    return resp.channels
+  } catch (e) {
+    return []
+  }
+}
 
 
 ///// GITHUB //////
@@ -145,30 +225,11 @@ webhooks.on('release', async ({ id, name, payload }) => {
   }
 });
 
-const setupWebhook = async (owner, repo, say, respond) => {
-  try {
-    const resp = await createWebhook(owner, repo)
-    await say(`Buffet is now listening to releases on this repository: ${resp.url}`)
-  } catch (e) {
-    console.log(e)
-    await respond(`An issue occured while creating a webhook for this repository: ${e.request.url}`)
-  }
-}
-
-const getWorkflow = async (owner, repo, workflow) => {
-  const resp = await octokit.request(`GET /repos/{owner}/{repo}/actions/workflows`, {
-    owner: owner,
-    repo: repo,
-  })
-  console.log(resp.data.workflows)
-}
-
-
 /**
 * Creates a webhook back to this app given an owner and repo
 */
 const createWebhook = async (owner, repo) => {
-  // validate that a hook is not already created for this app
+  // Will error if a webhook with this configuration already exists
   return await octokit.request(`POST /repos/${owner}/${repo}/hooks`, {
     owner: owner,
     repo: repo,
@@ -185,16 +246,69 @@ const createWebhook = async (owner, repo) => {
   });
 }
 
-
-///// JIRA METHODS /////
-
-const generateAuthHeader = () => {
-  const token = `${JIRA_USER_EMAIL}:${process.env.JIRA_API_KEY_2}`
-  const encodedToken = Buffer.from(token, 'binary').toString('base64')
-  const decodedToken = Buffer.from(encodedToken, 'base64').toString('binary')
-  return {Authorization: `Basic ${encodedToken}`};
+/**
+* Runs a workflow on a tag on a repo
+*/
+const dispatchWorkflow = async (owner, repo, workflow, tag) => {
+  const resp = await octokit.request(`POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches`, {
+    owner: owner,
+    repo: repo,
+    workflow_id: workflow,
+    ref: tag,
+    inputs: {
+      tag
+    }
+  })
 }
 
+/**
+* Gets a github workflow by repo details and workflow file name
+*/
+const getWorkflow = async (owner, repo, workflow) => {
+  try {
+    const resp = await octokit.request(`GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}`, {
+      owner: owner,
+      repo: repo,
+      workflow_id: workflow
+    })
+    return resp.data
+  } catch (e) {
+    console.log(e)
+    throw (e)
+  }
+}
+
+/**
+* Gets a github workflow by repo details and workflow file name
+*/
+const getLatestWorkflowRun = async (owner, repo, workflow) => {
+  try {
+    const resp = await octokit.request(`GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs`, {
+      owner: owner,
+      repo: repo,
+      workflow_id: workflow
+    })
+    return resp.data.workflow_runs[0]
+  } catch (e) {
+    return null
+  }
+}
+
+
+///// JIRA /////
+
+/**
+* Returns configs for all jira issues found in a string
+*/
+const getJiraLinks = async (text, project) => {
+  const jira_issues = project ? [...new Set(parseJiraIssues(text, project))] : [] // Scrape and dedup jira issues
+  const responses = jira_issues.length ? await Promise.all(jira_issues.map(issue => getJiraIssue(issue))) : []
+  return responses.filter(issue => issue) // Remove any matches that were not found
+}
+
+/**
+* Gets jira issue from Atlassian API
+*/
 const getJiraIssue = async (issue) => {
   try {
     const resp = await axios.get(JIRA_BASE_URL + `/issue/${issue}`, {
@@ -205,11 +319,26 @@ const getJiraIssue = async (issue) => {
     });
     return resp.data
   } catch (e) {
-    // console.log(e)
     return null
   }
 }
 
+/**
+* Matches jira issue names in a string
+*/
 const parseJiraIssues = (text, project) => {
   return text.match(new RegExp(`(${project}-\\d+)`, 'g'))
 }
+
+/**
+* Creates authentication header for Atlassian API
+*/
+const generateAuthHeader = () => {
+  const token = `${JIRA_USER_EMAIL}:${process.env.JIRA_API_KEY_2}`
+  const encodedToken = Buffer.from(token, 'binary').toString('base64')
+  return {Authorization: `Basic ${encodedToken}`};
+}
+
+///// HELPERS //////
+
+const delay = t => new Promise(resolve => setTimeout(resolve, t));
