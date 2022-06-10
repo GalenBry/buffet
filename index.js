@@ -101,7 +101,7 @@ slack_app.action("deploy_release", async ({ ack, respond, say, client, body, pay
 
     // Wait a couple seconds to allow github to insert new run to db
     await delay(2000)
-    const workflowRun = await getLatestWorkflowRun(owner, name, workflow)
+    const workflowRun = await getLatestWorkflowRun(owner, repo, workflow)
 
     const workflowRunInfo = workflowRun ? `The workflow can be found here: ${workflowRun.html_url}` : ''
     await say({
