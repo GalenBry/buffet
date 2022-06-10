@@ -6,8 +6,15 @@ on:
         description: 'Tag to deploy'     
         required: true
 jobs:
-  sync_git_repo:
+ repo-sync:
     runs-on: ubuntu-latest
     steps:
-    - run: |
-        echo "deploy triggered for tag: ${{ github.event.inputs.tag }}"
+    - name: repo-sync
+      uses: wei/git-sync@v1
+      env:
+        SOURCE_REPO: "GalenBry/buffet"
+        SOURCE_BRANCH: "refs/tags/${{ github.event.inputs.tag }}"
+        DESTINATION_REPO: ${{ secrets.glitch_git_URL }}
+        DESTINATION_BRANCH: "master"
+      with:
+        args: $SOURCE_REPO $SOURCE_BRANCH $DESTINATION_REPO $DESTINATION_BRANCH
