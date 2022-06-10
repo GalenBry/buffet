@@ -10,4 +10,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - run: |
-        echo "deploy triggered"
+        echo "deploy triggered for tag: ${{ github.event.inputs.tag }}"
