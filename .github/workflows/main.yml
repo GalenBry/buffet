@@ -1,7 +1,10 @@
 name: Deploy to Glitch
 on:
   workflow_dispatch:
-
+    inputs:
+      tag:
+        description: 'Tag to deploy'     
+        required: true
 jobs:
   sync_git_repo:
     runs-on: ubuntu-latest
