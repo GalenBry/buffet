@@ -92,9 +92,7 @@ slack_app.action("deploy_release", async ({ ack, respond, say, client, body, pay
         text: ':runner: Initiating deploy...',
       })
     } catch (e) {
-      console.log(e)
-      //respond
-      await say({
+      await respond({
         thread_ts: body.message.ts,
         text: ':x: Workflow could not be initiated',
       })
@@ -111,8 +109,7 @@ slack_app.action("deploy_release", async ({ ack, respond, say, client, body, pay
       text: `:rocket: A deploy workflow has been initiated by <@${body.user.id}>. ${workflowRunInfo}`,
     })
   } else {
-    // respond
-    await say({
+    await respond({
       thread_ts: body.message.ts,
       text: ':x: Workflow configuration for this repo not found!',
     })
