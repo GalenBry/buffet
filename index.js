@@ -152,7 +152,7 @@ const sendNewReleaseMessage = async (channel, repository, release) => {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `:wave: *A new release has been published*`
+          text: `:wave: *A new release has been published* :pray:`
         }
       },
       {
