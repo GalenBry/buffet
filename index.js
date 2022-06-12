@@ -7,24 +7,34 @@ const { Octokit } = require("@octokit/rest");
 
 const { addRepo, getRepo } = require('./store');
 
-const GITHUB_USER_NAME = 'GalenBry'
-const GITHUB_GLITCH_CALLBACK_URL = 'https://beaded-periwinkle-ring.glitch.me/api/github/webhooks'
-const JIRA_USER_EMAIL = 'galen.bryant@outlook.com'
-const JIRA_BASE_URL = 'https://slack-test-app.atlassian.net/rest/api/2'
+const {
+  PORT,
+  SLACK_SIGNING_SECRET,
+  SLACK_BOT_TOKEN,
+  SLACK_APP_TOKEN,
+  GITHUB_WEBHOOK_SECRET,
+  GITHUB_API_SECRET,
+  JIRA_ORG_ID,
+  JIRA_API_KEY,
+  GITHUB_USER_NAME,
+  GITHUB_GLITCH_CALLBACK_URL,
+  JIRA_USER_EMAIL,
+  JIRA_BASE_URL,
+} = process.env
 
 /////// SETUP ///////
 
 // Start Slack app
 let app_info; // will store info about this bot
 const slack_app = new App({
-  token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  token: SLACK_BOT_TOKEN,
+  signingSecret: SLACK_SIGNING_SECRET,
   socketMode: true,
-  appToken: process.env.SLACK_APP_TOKEN,
-  port: process.env.PORT || 3000
+  appToken: SLACK_APP_TOKEN,
+  port: PORT || 3000
 });
 (async () => {
-  await slack_app.start(process.env.PORT || 3000);
+  await slack_app.start(PORT || 3000);
   console.log('⚡️ Bolt app is running!');
 
   app_info = await slack_app.client.auth.test()
@@ -32,12 +42,12 @@ const slack_app = new App({
 
 // Create Github REST client
 const octokit = new Octokit({
-  auth: process.env.GITHUB_API_SECRET
+  auth: GITHUB_API_SECRET
 });
 
 // Start listener for github events
 const webhooks = new Webhooks({
-  secret: process.env.GITHUB_WEBHOOK_SECRET,
+  secret: GITHUB_WEBHOOK_SECRET,
 });
 createServer(createNodeMiddleware(webhooks)).listen(3000)
 console.log('⚡️ Github app is running!')
@@ -120,7 +130,7 @@ slack_app.action("deploy_release", async ({ ack, respond, say, client, body, pay
 * Function called after a new release has been published
 */
 const onNewRelease = async (repository, release) => {
-  // Send message to all bot channels
+  // Send message to all buffet's channels
   const channels = await getChannels();
   channels.forEach(channel => {
     sendNewReleaseMessage(channel, repository, release)
@@ -166,7 +176,7 @@ const sendNewReleaseMessage = async (channel, repository, release) => {
   });
 
   if (workflow) {
-    const result_2 = await slack_app.client.chat.postMessage({
+    await slack_app.client.chat.postMessage({
       channel: channel.id,
       text: `A deploy workflow has been setup for this repo`,
       thread_ts: result.message.ts,
@@ -215,9 +225,12 @@ const getChannels = async () => {
 
 ///// GITHUB //////
 
+/**
+* Hook that is run when a new release is published
+*/
 webhooks.on('release', async ({ id, name, payload }) => {
-  if (payload.action === 'released') {
-    const { repository, release } = payload
+  const { action, repository, release } = payload
+  if (action === 'released') {
     await onNewRelease(repository, release)
   }
 });
@@ -238,13 +251,13 @@ const createWebhook = async (owner, repo) => {
     config: {
       url: GITHUB_GLITCH_CALLBACK_URL,
       content_type: 'json',
-      secret: process.env.GITHUB_WEBHOOK_SECRET
+      secret: GITHUB_WEBHOOK_SECRET
     }
   });
 }
 
 /**
-* Runs a workflow on a tag on a repo
+* Runs a workflow for a tag on a repo
 */
 const dispatchWorkflow = async (owner, repo, workflow, tag) => {
   const resp = await octokit.request(`POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches`, {
@@ -259,24 +272,7 @@ const dispatchWorkflow = async (owner, repo, workflow, tag) => {
 }
 
 /**
-* Gets a github workflow by repo details and workflow file name
-*/
-const getWorkflow = async (owner, repo, workflow) => {
-  try {
-    const resp = await octokit.request(`GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}`, {
-      owner: owner,
-      repo: repo,
-      workflow_id: workflow
-    })
-    return resp.data
-  } catch (e) {
-    console.log(e)
-    throw (e)
-  }
-}
-
-/**
-* Gets a github workflow by repo details and workflow file name
+* Gets the latest github repo workflow run
 */
 const getLatestWorkflowRun = async (owner, repo, workflow) => {
   try {
@@ -331,7 +327,7 @@ const parseJiraIssues = (text, project) => {
 * Creates authentication header for Atlassian API
 */
 const generateAuthHeader = () => {
-  const token = `${JIRA_USER_EMAIL}:${process.env.JIRA_API_KEY_2}`
+  const token = `${JIRA_USER_EMAIL}:${JIRA_API_KEY}`
   const encodedToken = Buffer.from(token, 'binary').toString('base64')
   return {Authorization: `Basic ${encodedToken}`};
 }
