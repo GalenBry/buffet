@@ -68,9 +68,9 @@ slack_app.command("/buffet", async ({command, ack, say, respond }) => {
 
     try {
       const resp = await createWebhook(owner, repo)
-      await say(`Buffet is now listening to releases on this repository: ${resp.url}`)
+      await say(`Buffet is now listening to releases on this repository: https://github.com/${owner}/${repo}`)
     } catch (e) {
-      await respond(`An issue occured while creating a webhook for this repository: ${e.request.url}`)
+      await respond(`An issue occured while creating a webhook for this repository: https://github.com/${owner}/${repo}`)
     }
 
     // Save repo settings for later
