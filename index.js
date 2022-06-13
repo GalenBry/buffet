@@ -80,6 +80,8 @@ slack_app.command("/buffet", async ({command, ack, say, respond }) => {
       workflow,
       jira_project
     })
+  } else if (action === 'demo') {
+      await say(`:tada: This is the best demo ever! :confetti_ball:`)
   } else {
     await respond('command must be of this format `setup [repository_owner] [repository_name] [repository_workflow] [jira_project_shortname]`')
   }
