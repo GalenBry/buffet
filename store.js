@@ -9,6 +9,7 @@
 // }
 
 const repos = {
+  // Hard coded for demo just to be safe since Glitch will re-create this object on file change
   buffet: {
     name: 'buffet',
     owner: 'GalenBry',
